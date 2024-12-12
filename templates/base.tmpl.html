@@ -1,0 +1,16 @@
+{{ define "base" }}
+<!doctype html>
+<html>
+
+<head>
+  <title>{{.PageTitle}}</title>
+</head>
+
+<body>
+  {{ template "content" . }}
+
+  <p><a href="/uploads/">View files</a></p>
+</body>
+
+</html>
+{{ end }}
