@@ -1,12 +1,16 @@
 package main
 
 import (
+	"embed"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"text/template"
 )
+
+//go:embed templates/*
+var templates embed.FS
 
 func main() {
 
@@ -18,7 +22,7 @@ func main() {
 	http.ListenAndServe(":8080", mux)
 }
 
-var indexTemplate = template.Must(template.ParseFiles("templates/index.tmpl.html", "templates/base.tmpl.html"))
+var indexTemplate = template.Must(template.ParseFS(templates, "templates/index.tmpl.html", "templates/base.tmpl.html"))
 
 type IndexData struct {
 	PageTitle string
@@ -28,7 +32,7 @@ func indexHandler(w http.ResponseWriter, _ *http.Request) {
 	indexTemplate.ExecuteTemplate(w, "base", IndexData{PageTitle: "Upload File"})
 }
 
-var uploadTemplate = template.Must(template.ParseFiles("templates/upload.tmpl.html", "templates/base.tmpl.html"))
+var uploadTemplate = template.Must(template.ParseFS(templates, "templates/upload.tmpl.html", "templates/base.tmpl.html"))
 
 type UploadData struct {
 	PageTitle string
