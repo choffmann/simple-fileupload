@@ -50,17 +50,11 @@ func signIn(t *testing.T, app *App, req *http.Request, username string) *http.Re
 	return req
 }
 
-func qrMux(app *App) *http.ServeMux {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /qr/{username}/{path...}", app.qrHandler)
-	return mux
-}
-
 func TestQRHandlerRendersPageWithPublicURL(t *testing.T) {
 	app := newTestApp(t)
 
 	rec := httptest.NewRecorder()
-	qrMux(app).ServeHTTP(rec, httptest.NewRequest("GET", "/qr/alice/alte%20fotos/%C3%9Cbung%201.pdf", nil))
+	app.newMux().ServeHTTP(rec, httptest.NewRequest("GET", "/qr/alice/alte%20fotos/%C3%9Cbung%201.pdf", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("got status %d, want %d (body: %s)", rec.Code, http.StatusOK, rec.Body)
@@ -80,7 +74,7 @@ func TestQRHandlerServesPNG(t *testing.T) {
 	app := newTestApp(t)
 
 	rec := httptest.NewRecorder()
-	qrMux(app).ServeHTTP(rec, httptest.NewRequest("GET", "/qr/alice/alte%20fotos/%C3%9Cbung%201.pdf?format=png", nil))
+	app.newMux().ServeHTTP(rec, httptest.NewRequest("GET", "/qr/alice/alte%20fotos/%C3%9Cbung%201.pdf?format=png", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
@@ -100,7 +94,7 @@ func TestQRHandlerPNGDownloadSetsDisposition(t *testing.T) {
 	app := newTestApp(t)
 
 	rec := httptest.NewRecorder()
-	qrMux(app).ServeHTTP(rec, httptest.NewRequest("GET", "/qr/alice/alte%20fotos/%C3%9Cbung%201.pdf?format=png&download=1", nil))
+	app.newMux().ServeHTTP(rec, httptest.NewRequest("GET", "/qr/alice/alte%20fotos/%C3%9Cbung%201.pdf?format=png&download=1", nil))
 
 	got := rec.Header().Get("Content-Disposition")
 	if !strings.HasPrefix(got, "attachment;") {
@@ -112,7 +106,7 @@ func TestQRHandlerUnknownPathIsNotFound(t *testing.T) {
 	app := newTestApp(t)
 
 	rec := httptest.NewRecorder()
-	qrMux(app).ServeHTTP(rec, httptest.NewRequest("GET", "/qr/alice/gibtsnicht.pdf", nil))
+	app.newMux().ServeHTTP(rec, httptest.NewRequest("GET", "/qr/alice/gibtsnicht.pdf", nil))
 
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("got status %d, want %d", rec.Code, http.StatusNotFound)
@@ -123,7 +117,7 @@ func TestQRHandlerDirectoryURLKeepsTrailingSlash(t *testing.T) {
 	app := newTestApp(t)
 
 	rec := httptest.NewRecorder()
-	qrMux(app).ServeHTTP(rec, httptest.NewRequest("GET", "/qr/alice/alte%20fotos/", nil))
+	app.newMux().ServeHTTP(rec, httptest.NewRequest("GET", "/qr/alice/alte%20fotos/", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("got status %d, want %d (body: %s)", rec.Code, http.StatusOK, rec.Body)
@@ -188,8 +182,7 @@ func TestBrowseHandlerEscapesLinks(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{username}/{path...}", app.browseHandler)
+	mux := app.newMux()
 
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/alice/alte%20fotos/", nil))
@@ -229,8 +222,7 @@ func TestUploadWithoutSessionRedirectsToLogin(t *testing.T) {
 func TestBrowseShowsUploadFormOnlyToTheOwner(t *testing.T) {
 	app := newTestApp(t)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{username}/{path...}", app.browseHandler)
+	mux := app.newMux()
 
 	t.Run("owner sees the form", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/alice/", nil)
@@ -366,8 +358,7 @@ func TestLogoutClearsTheSessionAndRedirects(t *testing.T) {
 func TestHeaderShowsSignInWithoutSession(t *testing.T) {
 	app := newTestApp(t)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{username}/{path...}", app.browseHandler)
+	mux := app.newMux()
 
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/alice/", nil))
@@ -384,8 +375,7 @@ func TestHeaderShowsSignInWithoutSession(t *testing.T) {
 func TestHeaderShowsSignOutWithSession(t *testing.T) {
 	app := newTestApp(t)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{username}/{path...}", app.browseHandler)
+	mux := app.newMux()
 
 	req := httptest.NewRequest("GET", "/alice/", nil)
 	signIn(t, app, req, "alice")
@@ -409,7 +399,7 @@ func TestQRPageShowsTheSignedInUser(t *testing.T) {
 	signIn(t, app, req, "alice")
 
 	rec := httptest.NewRecorder()
-	qrMux(app).ServeHTTP(rec, req)
+	app.newMux().ServeHTTP(rec, req)
 
 	if !strings.Contains(rec.Body.String(), `action="/auth/logout"`) {
 		t.Error("the qr page does not carry the session header")
@@ -419,8 +409,7 @@ func TestQRPageShowsTheSignedInUser(t *testing.T) {
 func TestBrowseRejectsEncodedTraversalInTheUsername(t *testing.T) {
 	app := newTestApp(t)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{username}/{path...}", app.browseHandler)
+	mux := app.newMux()
 
 	for _, target := range []string{"/..%2f..%2fetc/", "/..%2f/", "/alice%2f..%2f..%2fetc/"} {
 		rec := httptest.NewRecorder()
@@ -429,5 +418,50 @@ func TestBrowseRejectsEncodedTraversalInTheUsername(t *testing.T) {
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("%s: got status %d, want %d (body: %s)", target, rec.Code, http.StatusNotFound, rec.Body)
 		}
+	}
+}
+
+func TestMuxKeepsUploadAndMkdirBehindASession(t *testing.T) {
+	app := newTestApp(t)
+	mux := app.newMux()
+
+	for _, target := range []string{"/upload", "/mkdir"} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest("POST", target, strings.NewReader("")))
+
+		if rec.Code != http.StatusSeeOther {
+			t.Errorf("%s: got status %d, want %d", target, rec.Code, http.StatusSeeOther)
+		}
+		if got := rec.Header().Get("Location"); got != "/auth/login" {
+			t.Errorf("%s: got Location %q, want %q", target, got, "/auth/login")
+		}
+	}
+}
+
+func TestMuxRoutesEveryEndpoint(t *testing.T) {
+	app := newTestApp(t)
+	app.authorizeURL = "https://kc.example.com/auth"
+	mux := app.newMux()
+
+	tests := []struct {
+		method string
+		target string
+		want   int
+	}{
+		{"GET", "/", http.StatusOK},
+		{"GET", "/alice/", http.StatusOK},
+		{"GET", "/qr/alice/", http.StatusOK},
+		{"GET", "/auth/login", http.StatusFound},
+		{"GET", "/auth/callback", http.StatusBadRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.method+" "+tt.target, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, httptest.NewRequest(tt.method, tt.target, nil))
+
+			if rec.Code != tt.want {
+				t.Errorf("got status %d, want %d (body: %s)", rec.Code, tt.want, rec.Body)
+			}
+		})
 	}
 }
