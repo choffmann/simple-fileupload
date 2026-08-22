@@ -1,0 +1,36 @@
+{{ define "content" }}
+<div class="qr-page">
+  <h1>{{ .Heading }}</h1>
+
+  <img class="qr-image" src="{{ .ImageURL }}" alt="QR code for {{ .PublicURL }}" width="320" height="320">
+
+  <p><code class="public-url" data-url="{{ .PublicURL }}">{{ .PublicURL }}</code></p>
+
+  <p class="qr-actions">
+    <button type="button" id="copy-url" hidden>Copy URL</button>
+    <a href="{{ .DownloadURL }}">Download PNG</a>
+  </p>
+
+  <p><a href="{{ .BackURL }}">&larr; Back to {{ .BackLabel }}</a></p>
+</div>
+
+<script>
+  (function () {
+    var button = document.getElementById("copy-url");
+    var target = document.querySelector(".public-url");
+    // clipboard is only exposed in secure contexts, so http deployments keep
+    // the plain selectable url instead of a button that throws.
+    if (!button || !target || !navigator.clipboard) {
+      return;
+    }
+    button.hidden = false;
+    button.addEventListener("click", function () {
+      navigator.clipboard.writeText(target.dataset.url).then(function () {
+        button.textContent = "Copied";
+      }, function () {
+        button.textContent = "Copy failed";
+      });
+    });
+  })();
+</script>
+{{ end }}

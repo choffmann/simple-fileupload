@@ -5,6 +5,7 @@ import (
 	"embed"
 	"html/template"
 	"log/slog"
+	"mime"
 	"net/http"
 	"os"
 	"path"
@@ -22,6 +23,7 @@ var templateFS embed.FS
 
 var indexTemplate = template.Must(template.ParseFS(templateFS, "templates/base.tmpl.html", "templates/index.tmpl.html"))
 var browseTemplate = template.Must(template.ParseFS(templateFS, "templates/base.tmpl.html", "templates/browse.tmpl.html"))
+var qrTemplate = template.Must(template.ParseFS(templateFS, "templates/base.tmpl.html", "templates/qr.tmpl.html"))
 
 type ctxKey string
 
@@ -169,6 +171,16 @@ type BrowseData struct {
 type Breadcrumb struct {
 	Name string
 	Path string
+}
+
+type QRData struct {
+	PageTitle   string
+	Heading     string
+	PublicURL   string
+	ImageURL    string
+	DownloadURL string
+	BackURL     string
+	BackLabel   string
 }
 
 func buildBreadcrumbs(username, p string) []Breadcrumb {
@@ -321,24 +333,85 @@ func (app *App) qrHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := app.store.IsDir(username, subpath); err != nil {
+	isDir, err := app.store.IsDir(username, subpath)
+	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
 
-	publicURL, err := publicurl.For(app.baseURL, username, subpath)
+	target := subpath
+	if isDir && target != "" {
+		target += "/"
+	}
+
+	publicURL, err := publicurl.For(app.baseURL, username, target)
 	if err != nil {
 		app.logger.Error("failed to build public url", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	png, err := qr.Generate(publicURL, 256)
+	if r.URL.Query().Get("format") == "png" {
+		app.serveQRImage(w, r, username, subpath, publicURL)
+		return
+	}
+
+	name := username
+	if subpath != "" {
+		name = path.Base(subpath)
+	}
+
+	backPath := subpath
+	if !isDir {
+		if d := path.Dir(subpath); d != "." {
+			backPath = d
+		} else {
+			backPath = ""
+		}
+	}
+	if backPath != "" {
+		backPath += "/"
+	}
+
+	backLabel := username
+	if backPath != "" {
+		backLabel = path.Base(backPath)
+	}
+
+	escaped := r.URL.EscapedPath()
+
+	qrTemplate.ExecuteTemplate(w, "base", QRData{
+		PageTitle:   "QR — " + name,
+		Heading:     name,
+		PublicURL:   publicURL,
+		ImageURL:    escaped + "?format=png",
+		DownloadURL: escaped + "?format=png&download=1",
+		BackURL:     publicurl.Path(username, backPath),
+		BackLabel:   backLabel,
+	})
+}
+
+func (app *App) serveQRImage(w http.ResponseWriter, r *http.Request, username, subpath, publicURL string) {
+	png, err := qr.Generate(publicURL, 512)
 	if err != nil {
+		app.logger.Error("failed to generate qr code", "error", err)
 		http.Error(w, "Failed to generate QR code", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "image/png")
+
+	if r.URL.Query().Get("download") == "1" {
+		name := username
+		if subpath != "" {
+			name = path.Base(subpath)
+		}
+		// FormatMediaType handles quoting and non-ascii names; an empty result
+		// means the name could not be encoded, so the header is skipped.
+		if disposition := mime.FormatMediaType("attachment", map[string]string{"filename": name + ".qr.png"}); disposition != "" {
+			w.Header().Set("Content-Disposition", disposition)
+		}
+	}
+
 	w.Write(png)
 }
