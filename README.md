@@ -99,3 +99,7 @@ The realm's redirect URI is pinned to `http://localhost:8080/auth/callback`, so 
 go test -race ./...
 golangci-lint run
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE).
