@@ -40,14 +40,14 @@ func (s *Storage) EnsureUserDir(username string) error {
 	return os.MkdirAll(dir, 0o755)
 }
 
-func (s *Storage) SaveFile(username, subpath string, file io.Reader, filename string) error {
+func (s *Storage) SaveFile(username, subpath string, file io.Reader, filename string) (string, error) {
 	dir, err := s.ResolvePath(username, subpath)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
+		return "", err
 	}
 
 	cleanName := sanitizeFilename(filename)
@@ -56,17 +56,19 @@ func (s *Storage) SaveFile(username, subpath string, file io.Reader, filename st
 	// Verify the final path is still within user directory
 	userDir := filepath.Join(s.BaseDir, filepath.Clean(username))
 	if !strings.HasPrefix(dst, userDir) {
-		return fmt.Errorf("invalid filename")
+		return "", fmt.Errorf("invalid filename")
 	}
 
 	f, err := os.Create(dst)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer f.Close()
 
-	_, err = io.Copy(f, file)
-	return err
+	if _, err := io.Copy(f, file); err != nil {
+		return "", err
+	}
+	return cleanName, nil
 }
 
 func (s *Storage) ListDir(username, subpath string) ([]Entry, error) {
