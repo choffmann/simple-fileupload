@@ -93,6 +93,11 @@ func main() {
 		secureCookies: secureCookies,
 	}
 
+	logger.Info("starting server on :8080")
+	http.ListenAndServe(":8080", app.newMux())
+}
+
+func (app *App) newMux() *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /{$}", app.indexHandler)
@@ -104,8 +109,7 @@ func main() {
 	mux.HandleFunc("GET /auth/callback", app.callbackHandler)
 	mux.HandleFunc("POST /auth/logout", app.logoutHandler)
 
-	logger.Info("starting server on :8080")
-	http.ListenAndServe(":8080", mux)
+	return mux
 }
 
 func (app *App) requireUser(next http.Handler) http.Handler {
