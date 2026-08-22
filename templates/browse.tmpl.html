@@ -1,0 +1,58 @@
+{{ define "content" }}
+<div class="breadcrumb">
+  {{ range .Breadcrumbs }}
+    / <a href="{{ .Path }}">{{ .Name }}</a>
+  {{ end }}
+</div>
+
+{{ if .IsOwner }}
+<div class="actions">
+  <form method="post" action="/upload" enctype="multipart/form-data">
+    <input type="hidden" name="dir" value="{{ .CurrentPath }}" />
+    <input type="file" name="file" required />
+    <button type="submit">Upload</button>
+  </form>
+
+  <form method="post" action="/mkdir">
+    <input type="hidden" name="dir" value="{{ .CurrentPath }}" />
+    <input type="text" name="name" placeholder="New folder" required />
+    <button type="submit">Create</button>
+  </form>
+</div>
+{{ end }}
+
+<table>
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Size</th>
+      <th>Modified</th>
+      <th>QR</th>
+    </tr>
+  </thead>
+  <tbody>
+    {{ if .HasParent }}
+    <tr>
+      <td colspan="4"><a href="/{{ $.Username }}/{{ .ParentPath }}">..</a></td>
+    </tr>
+    {{ end }}
+    {{ range .Entries }}
+    <tr>
+      <td>
+        {{ if .IsDir }}
+          <span class="icon">&#128193;</span><a href="/{{ $.Username }}/{{ $.CurrentPathSlash }}{{ .Name }}/">{{ .Name }}/</a>
+        {{ else }}
+          <span class="icon">&#128196;</span><a href="/{{ $.Username }}/{{ $.CurrentPathSlash }}{{ .Name }}">{{ .Name }}</a>
+        {{ end }}
+      </td>
+      <td>{{ if not .IsDir }}{{ .Size }}{{ end }}</td>
+      <td>{{ .ModTime.Format "2006-01-02 15:04" }}</td>
+      <td><a class="qr-link" href="/qr/{{ $.Username }}/{{ $.CurrentPathSlash }}{{ .Name }}" target="_blank">QR</a></td>
+    </tr>
+    {{ end }}
+    {{ if and (not .Entries) (not .HasParent) }}
+    <tr><td colspan="4">No files yet.</td></tr>
+    {{ end }}
+  </tbody>
+</table>
+{{ end }}

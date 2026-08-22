@@ -1,9 +1,12 @@
 {{ define "content" }}
-<h1>Upload</h1>
+<h1>Areas</h1>
 
-<form method="post" action="/" enctype="multipart/form-data">
-  <input type="file" name="file" />
-  <input type="submit" value="Upload" />
-</form>
-
+<ul>
+  {{ range .Users }}
+  <li><a href="/{{ . }}/">{{ . }}</a></li>
+  {{ end }}
+  {{ if not .Users }}
+  <li>No areas configured yet.</li>
+  {{ end }}
+</ul>
 {{ end }}
