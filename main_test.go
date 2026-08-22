@@ -256,3 +256,109 @@ func TestBrowseShowsUploadFormOnlyToTheOwner(t *testing.T) {
 		}
 	})
 }
+
+func TestLoginSetsStateCookieAndRedirectsToTheProvider(t *testing.T) {
+	app := newTestApp(t)
+	app.authorizeURL = "https://kc.example.com/auth"
+
+	rec := httptest.NewRecorder()
+	app.loginHandler(rec, httptest.NewRequest("GET", "/auth/login", nil))
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusFound)
+	}
+
+	var state *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == stateCookieName {
+			state = c
+		}
+	}
+	if state == nil {
+		t.Fatal("the login handler did not set a state cookie")
+	}
+	if !state.HttpOnly {
+		t.Error("the state cookie is not HttpOnly")
+	}
+	if _, _, ok := strings.Cut(state.Value, "."); !ok {
+		t.Errorf("state cookie %q does not carry both state and nonce", state.Value)
+	}
+}
+
+func TestCallbackWithoutStateCookieIsRejected(t *testing.T) {
+	app := newTestApp(t)
+
+	rec := httptest.NewRecorder()
+	app.callbackHandler(rec, httptest.NewRequest("GET", "/auth/callback?code=abc&state=xyz", nil))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("got status %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestCallbackWithMismatchedStateIsRejected(t *testing.T) {
+	app := newTestApp(t)
+
+	req := httptest.NewRequest("GET", "/auth/callback?code=abc&state=wrong", nil)
+	req.AddCookie(&http.Cookie{Name: stateCookieName, Value: "expected.somenonce"})
+
+	rec := httptest.NewRecorder()
+	app.callbackHandler(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("got status %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestCallbackWithoutCodeIsRejected(t *testing.T) {
+	app := newTestApp(t)
+
+	req := httptest.NewRequest("GET", "/auth/callback?state=expected", nil)
+	req.AddCookie(&http.Cookie{Name: stateCookieName, Value: "expected.somenonce"})
+
+	rec := httptest.NewRecorder()
+	app.callbackHandler(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("got status %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestCallbackClearsTheStateCookieOnFailure(t *testing.T) {
+	app := newTestApp(t)
+
+	rec := httptest.NewRecorder()
+	app.callbackHandler(rec, httptest.NewRequest("GET", "/auth/callback", nil))
+
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == stateCookieName && c.MaxAge < 0 {
+			return
+		}
+	}
+	t.Error("the failing callback did not expire the state cookie")
+}
+
+func TestLogoutClearsTheSessionAndRedirects(t *testing.T) {
+	app := newTestApp(t)
+	app.logoutURL = "https://kc.example.com/logout"
+
+	req := httptest.NewRequest("POST", "/auth/logout", nil)
+	signIn(t, app, req, "alice")
+
+	rec := httptest.NewRecorder()
+	app.logoutHandler(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusSeeOther)
+	}
+	if got := rec.Header().Get("Location"); got != "https://kc.example.com/logout" {
+		t.Errorf("got Location %q, want the provider logout url", got)
+	}
+
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == session.CookieName && c.MaxAge < 0 {
+			return
+		}
+	}
+	t.Error("logout did not expire the session cookie")
+}
