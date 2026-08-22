@@ -518,3 +518,33 @@ func TestLogoutAcceptsItsOwnOrigin(t *testing.T) {
 		t.Errorf("got status %d, want %d", rec.Code, http.StatusSeeOther)
 	}
 }
+
+func TestServedFilesCarryHardeningHeaders(t *testing.T) {
+	app := newTestApp(t)
+	mux := app.newMux()
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/alice/alte%20fotos/%C3%9Cbung%201.pdf", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("got X-Content-Type-Options %q, want %q", got, "nosniff")
+	}
+	if got := rec.Header().Get("Content-Security-Policy"); got == "" {
+		t.Error("served files carry no Content-Security-Policy")
+	}
+}
+
+func TestDirectoryListingIsNotLockedDown(t *testing.T) {
+	app := newTestApp(t)
+	mux := app.newMux()
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/alice/", nil))
+
+	if got := rec.Header().Get("Content-Security-Policy"); got != "" {
+		t.Errorf("the browse page carries a Content-Security-Policy %q, which would break its own markup", got)
+	}
+}

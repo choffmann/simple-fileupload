@@ -253,6 +253,10 @@ func (app *App) browseHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}
+		// uploaded files come back from this origin, so html or svg would
+		// otherwise run as first party script against every visitor's session
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; form-action 'none'")
 		http.ServeFile(w, r, fullPath)
 		return
 	}
