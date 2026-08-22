@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"log/slog"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path"
@@ -322,32 +323,60 @@ func (app *App) browseHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+const (
+	maxUploadBytes  = 200 << 20
+	uploadMemBudget = 32 << 20
+)
+
 func (app *App) uploadHandler(w http.ResponseWriter, r *http.Request) {
 	username := usernameFromContext(r.Context())
 
-	r.Body = http.MaxBytesReader(w, r.Body, 10<<20) // 10 MB
-	file, header, err := r.FormFile("file")
-	if err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
+	// anything beyond the memory budget spills into temp files, so a request
+	// close to maxUploadBytes does not have to fit into RAM
+	if err := r.ParseMultipartForm(uploadMemBudget); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	defer func() { _ = file.Close() }()
+	defer func() { _ = r.MultipartForm.RemoveAll() }()
 
-	dir := r.FormValue("dir")
-
-	savedName, err := app.store.SaveFile(username, dir, file, header.Filename)
-	if err != nil {
-		app.logger.Error("failed to save file", "error", err)
-		http.Error(w, "Failed to save file", http.StatusInternalServerError)
+	headers := r.MultipartForm.File["file"]
+	if len(headers) == 0 {
+		http.Error(w, "No file selected", http.StatusBadRequest)
 		return
 	}
 
-	uploaded := savedName
-	if dir := strings.Trim(dir, "/"); dir != "" {
-		uploaded = dir + "/" + savedName
+	dir := r.FormValue("dir")
+
+	for _, header := range headers {
+		if err := app.saveUpload(username, dir, header); err != nil {
+			app.logger.Error("failed to save file", "filename", header.Filename, "error", err)
+			http.Error(w, "Failed to save file", http.StatusInternalServerError)
+			return
+		}
 	}
 
-	http.Redirect(w, r, "/qr"+publicurl.Path(username, uploaded), http.StatusSeeOther)
+	http.Redirect(w, r, publicurl.Path(username, dirSubpath(dir)), http.StatusSeeOther)
+}
+
+func (app *App) saveUpload(username, dir string, header *multipart.FileHeader) error {
+	file, err := header.Open()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+
+	_, err = app.store.SaveFile(username, dir, file, header.Filename)
+	return err
+}
+
+// dirSubpath normalizes a form supplied directory into the trailing slash form
+// publicurl.Path needs to render it as a directory url.
+func dirSubpath(dir string) string {
+	if trimmed := strings.Trim(dir, "/"); trimmed != "" {
+		return trimmed + "/"
+	}
+	return ""
 }
 
 func (app *App) mkdirHandler(w http.ResponseWriter, r *http.Request) {
@@ -371,11 +400,7 @@ func (app *App) mkdirHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	parent := ""
-	if trimmed := strings.Trim(dir, "/"); trimmed != "" {
-		parent = trimmed + "/"
-	}
-	http.Redirect(w, r, publicurl.Path(username, parent), http.StatusSeeOther)
+	http.Redirect(w, r, publicurl.Path(username, dirSubpath(dir)), http.StatusSeeOther)
 }
 
 func (app *App) qrHandler(w http.ResponseWriter, r *http.Request) {

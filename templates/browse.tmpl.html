@@ -9,7 +9,7 @@
 <div class="actions">
   <form method="post" action="/upload" enctype="multipart/form-data">
     <input type="hidden" name="dir" value="{{ .CurrentPath }}" />
-    <input type="file" name="file" required />
+    <input type="file" name="file" multiple required />
     <button type="submit">Upload</button>
   </form>
 
