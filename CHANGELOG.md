@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.0](https://github.com/choffmann/simple-fileupload/compare/v1.0.0...v1.1.0) (2026-08-22)
+
+
+### Features
+
+* mark the parent entry with an up arrow icon ([69d20d1](https://github.com/choffmann/simple-fileupload/commit/69d20d13ca28829dfb7d348a043ba73b27dfbb6b))
+* show the build version in the footer ([ae42d65](https://github.com/choffmann/simple-fileupload/commit/ae42d65e19d5fe0c80bc1383ca761df2a89a27ab))
+* upload several files in one go ([9ff72c8](https://github.com/choffmann/simple-fileupload/commit/9ff72c8660177dd139a99751d1117f9ea68f069d))
+
 ## 1.0.0 (2026-08-22)
 
 
