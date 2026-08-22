@@ -76,13 +76,14 @@ docker run --rm -p 8080:8080 \
 
 The repository ships a Nix flake with the Go toolchain, `golangci-lint` and the
 rest of the tooling. With direnv it is `direnv allow`, otherwise `nix develop`.
+The recurring tasks live in the `justfile`, a bare `just` lists them.
 
 For a login you need a provider. The `compose.yaml` brings up a Keycloak with a
 preconfigured realm for exactly that, on `http://localhost:8081`, with the users
 `alice` and `bob` whose passwords match their usernames.
 
 ```bash
-docker compose up -d
+just infra-up
 
 export BASE_URL=http://localhost:8080
 export OIDC_ISSUER=http://localhost:8081/realms/simple-fileupload
@@ -93,12 +94,19 @@ go run .
 ```
 
 The realm's redirect URI is pinned to `http://localhost:8080/auth/callback`, so the
-`BASE_URL` above is the one that works out of the box.
+`BASE_URL` above is the one that works out of the box. Those four variables are also
+the defaults of the `justfile`, so `just dev` gets to the same place in one step and
+waits for Keycloak to report healthy before the server starts. `just infra-stop`
+stops the containers again, `just infra-down` additionally drops the Postgres volume
+and with it everything the realm has accumulated.
 
 ```bash
-go test -race ./...
-golangci-lint run
+just test
+just lint
 ```
+
+`just ci` runs `go vet`, the tests and the linter, the same three steps as the
+pipeline.
 
 ## License
 

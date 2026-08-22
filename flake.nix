@@ -30,6 +30,7 @@
           gotools
           golangci-lint
 
+          just
           gnumake
           pkg-config
           yq-go
