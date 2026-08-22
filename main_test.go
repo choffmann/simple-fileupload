@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -118,5 +119,53 @@ func TestQRHandlerDirectoryURLKeepsTrailingSlash(t *testing.T) {
 	wantURL := "https://files.example.com/alice/alte%20fotos/"
 	if !strings.Contains(rec.Body.String(), wantURL) {
 		t.Errorf("page does not contain %q\nbody: %s", wantURL, rec.Body)
+	}
+}
+
+func TestUploadRedirectsToQRPage(t *testing.T) {
+	tests := []struct {
+		name     string
+		dir      string
+		filename string
+		want     string
+	}{
+		{"root of the area", "", "foo.pdf", "/qr/alice/foo.pdf"},
+		{"subdirectory with spaces", "alte fotos", "Übung 1.pdf", "/qr/alice/alte%20fotos/%C3%9Cbung%201.pdf"},
+		{"sanitized filename", "", "../evil.txt", "/qr/alice/evil.txt"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := newTestApp(t)
+
+			body := &bytes.Buffer{}
+			writer := multipart.NewWriter(body)
+			if err := writer.WriteField("dir", tt.dir); err != nil {
+				t.Fatalf("WriteField: %v", err)
+			}
+			part, err := writer.CreateFormFile("file", tt.filename)
+			if err != nil {
+				t.Fatalf("CreateFormFile: %v", err)
+			}
+			if _, err := part.Write([]byte("payload")); err != nil {
+				t.Fatalf("writing part: %v", err)
+			}
+			if err := writer.Close(); err != nil {
+				t.Fatalf("closing writer: %v", err)
+			}
+
+			req := httptest.NewRequest("POST", "/upload", body)
+			req.Header.Set("Content-Type", writer.FormDataContentType())
+			req.SetBasicAuth("alice", "secret")
+
+			rec := httptest.NewRecorder()
+			app.authMiddleware(http.HandlerFunc(app.uploadHandler)).ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusSeeOther {
+				t.Fatalf("got status %d, want %d (body: %s)", rec.Code, http.StatusSeeOther, rec.Body)
+			}
+			if got := rec.Header().Get("Location"); got != tt.want {
+				t.Errorf("got Location %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

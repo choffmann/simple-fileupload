@@ -283,17 +283,19 @@ func (app *App) uploadHandler(w http.ResponseWriter, r *http.Request) {
 
 	dir := r.FormValue("dir")
 
-	if _, err := app.store.SaveFile(username, dir, file, header.Filename); err != nil {
+	savedName, err := app.store.SaveFile(username, dir, file, header.Filename)
+	if err != nil {
 		app.logger.Error("failed to save file", "error", err)
 		http.Error(w, "Failed to save file", http.StatusInternalServerError)
 		return
 	}
 
-	redirectPath := "/" + username + "/"
-	if dir != "" {
-		redirectPath = "/" + username + "/" + dir + "/"
+	uploaded := savedName
+	if dir := strings.Trim(dir, "/"); dir != "" {
+		uploaded = dir + "/" + savedName
 	}
-	http.Redirect(w, r, redirectPath, http.StatusSeeOther)
+
+	http.Redirect(w, r, "/qr"+publicurl.Path(username, uploaded), http.StatusSeeOther)
 }
 
 func (app *App) mkdirHandler(w http.ResponseWriter, r *http.Request) {
