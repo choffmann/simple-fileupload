@@ -21,6 +21,8 @@ COPY --from=builder /app/simple-fileupload /simple-fileupload
 EXPOSE 8080
 ENV BASIC_AUTH_USERNAME=
 ENV BASIC_AUTH_PASSWORD=
+ENV USERS_FILE=
+ENV BASE_URL=
+ENV UPLOAD_DIR=
 
 ENTRYPOINT [ "/simple-fileupload" ]
-
