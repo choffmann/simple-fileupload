@@ -16,6 +16,8 @@ FROM scratch
 WORKDIR /
 VOLUME [ "/data" ]
 
+# scratch ships no ca bundle, and oidc discovery does https before the server starts
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /app/simple-fileupload /simple-fileupload
 
 EXPOSE 8080
@@ -25,5 +27,7 @@ ENV OIDC_ISSUER=
 ENV OIDC_CLIENT_ID=
 ENV OIDC_CLIENT_SECRET=
 ENV SESSION_SECRET=
+ENV LOG_LEVEL=
+ENV LOG_FORMAT=
 
 ENTRYPOINT [ "/simple-fileupload" ]
