@@ -1,6 +1,0 @@
-[
-  {
-    "username": "alice",
-    "password": "$2a$10$REPLACE_WITH_BCRYPT_HASH"
-  }
-]
