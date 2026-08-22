@@ -33,21 +33,21 @@
   <tbody>
     {{ if .HasParent }}
     <tr>
-      <td colspan="4"><a href="/{{ $.Username }}/{{ .ParentPath }}">..</a></td>
+      <td colspan="4"><a href="{{ .ParentHref }}">..</a></td>
     </tr>
     {{ end }}
     {{ range .Entries }}
     <tr>
       <td>
         {{ if .IsDir }}
-          <span class="icon">&#128193;</span><a href="/{{ $.Username }}/{{ $.CurrentPathSlash }}{{ .Name }}/">{{ .Name }}/</a>
+          <span class="icon">&#128193;</span><a href="{{ .Href }}">{{ .Name }}/</a>
         {{ else }}
-          <span class="icon">&#128196;</span><a href="/{{ $.Username }}/{{ $.CurrentPathSlash }}{{ .Name }}">{{ .Name }}</a>
+          <span class="icon">&#128196;</span><a href="{{ .Href }}">{{ .Name }}</a>
         {{ end }}
       </td>
       <td>{{ if not .IsDir }}{{ .Size }}{{ end }}</td>
       <td>{{ .ModTime.Format "2006-01-02 15:04" }}</td>
-      <td><a class="qr-link" href="/qr/{{ $.Username }}/{{ $.CurrentPathSlash }}{{ .Name }}" target="_blank">QR</a></td>
+      <td><a class="qr-link" href="{{ .QRHref }}">QR</a></td>
     </tr>
     {{ end }}
     {{ if and (not .Entries) (not .HasParent) }}

@@ -169,3 +169,32 @@ func TestUploadRedirectsToQRPage(t *testing.T) {
 		})
 	}
 }
+
+func TestBrowseHandlerEscapesLinks(t *testing.T) {
+	app := newTestApp(t)
+	if err := os.WriteFile(filepath.Join(app.store.BaseDir, "alice", "alte fotos", "a#b.png"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{username}/{path...}", app.browseHandler)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/alice/alte%20fotos/", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got status %d, want %d (body: %s)", rec.Code, http.StatusOK, rec.Body)
+	}
+	body := rec.Body.String()
+
+	for _, want := range []string{
+		`href="/alice/alte%20fotos/a%23b.png"`,
+		`href="/qr/alice/alte%20fotos/a%23b.png"`,
+		`href="/alice/alte%20fotos/%C3%9Cbung%201.pdf"`,
+		`href="/qr/alice/alte%20fotos/%C3%9Cbung%201.pdf"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body is missing %s", want)
+		}
+	}
+}
