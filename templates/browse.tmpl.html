@@ -33,7 +33,7 @@
   <tbody>
     {{ if .HasParent }}
     <tr>
-      <td colspan="4"><a href="{{ .ParentHref }}">..</a></td>
+      <td colspan="4"><span class="icon">&#8624;</span><a href="{{ .ParentHref }}">..</a></td>
     </tr>
     {{ end }}
     {{ range .Entries }}
