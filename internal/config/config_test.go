@@ -125,3 +125,35 @@ func TestSessionSecretRejectsShortValues(t *testing.T) {
 		t.Error("SessionSecret() accepted an 8 character secret, want an error")
 	}
 }
+
+func TestOrigin(t *testing.T) {
+	tests := []struct {
+		name    string
+		baseURL string
+		want    string
+		wantErr bool
+	}{
+		{"plain host", "https://files.example.com", "https://files.example.com", false},
+		{"path is dropped", "https://files.example.com/share", "https://files.example.com", false},
+		{"port is kept", "http://localhost:8080", "http://localhost:8080", false},
+		{"empty", "", "", true},
+		{"no scheme", "files.example.com", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Origin(tt.baseURL)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("Origin(%q) returned %q, want an error", tt.baseURL, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Origin(%q) returned an unexpected error: %v", tt.baseURL, err)
+			}
+			if got != tt.want {
+				t.Errorf("Origin(%q) = %q, want %q", tt.baseURL, got, tt.want)
+			}
+		})
+	}
+}

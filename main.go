@@ -40,6 +40,7 @@ type App struct {
 	oidc          *appoidc.Provider
 	logger        *slog.Logger
 	baseURL       string
+	origin        string
 	secureCookies bool
 
 	// test seams: when set they replace the urls computed from the provider
@@ -51,6 +52,12 @@ func main() {
 	logger := config.NewLogger()
 
 	baseURL, err := config.RequireBaseURL()
+	if err != nil {
+		logger.Error("invalid configuration", "error", err)
+		os.Exit(1)
+	}
+
+	origin, err := config.Origin(baseURL)
 	if err != nil {
 		logger.Error("invalid configuration", "error", err)
 		os.Exit(1)
@@ -90,6 +97,7 @@ func main() {
 		oidc:          provider,
 		logger:        logger,
 		baseURL:       baseURL,
+		origin:        origin,
 		secureCookies: secureCookies,
 	}
 
@@ -103,11 +111,11 @@ func (app *App) newMux() *http.ServeMux {
 	mux.HandleFunc("GET /{$}", app.indexHandler)
 	mux.HandleFunc("GET /{username}/{path...}", app.browseHandler)
 	mux.HandleFunc("GET /qr/{username}/{path...}", app.qrHandler)
-	mux.Handle("POST /upload", app.requireUser(http.HandlerFunc(app.uploadHandler)))
-	mux.Handle("POST /mkdir", app.requireUser(http.HandlerFunc(app.mkdirHandler)))
+	mux.Handle("POST /upload", app.sameOrigin(app.requireUser(http.HandlerFunc(app.uploadHandler))))
+	mux.Handle("POST /mkdir", app.sameOrigin(app.requireUser(http.HandlerFunc(app.mkdirHandler))))
 	mux.HandleFunc("GET /auth/login", app.loginHandler)
 	mux.HandleFunc("GET /auth/callback", app.callbackHandler)
-	mux.HandleFunc("POST /auth/logout", app.logoutHandler)
+	mux.Handle("POST /auth/logout", app.sameOrigin(http.HandlerFunc(app.logoutHandler)))
 
 	return mux
 }
@@ -122,6 +130,20 @@ func (app *App) requireUser(next http.Handler) http.Handler {
 
 		ctx := context.WithValue(r.Context(), ctxUsername, username)
 		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func (app *App) sameOrigin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// SameSite=Lax does not help here: anyone can upload html into their own
+		// area, and it is then served from this very origin.
+		if r.Header.Get("Origin") != app.origin {
+			app.logger.Warn("rejected a cross origin request", "origin", r.Header.Get("Origin"), "path", r.URL.Path)
+			http.Error(w, "Cross origin request rejected", http.StatusForbidden)
+			return
+		}
+
+		next.ServeHTTP(w, r)
 	})
 }
 
