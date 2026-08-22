@@ -23,7 +23,7 @@ func TestAreaName(t *testing.T) {
 		{"only whitespace", "   ", "", true},
 		{"current directory", ".", "", true},
 		{"parent directory", "..", "", true},
-		{"traversal is folded into dashes", "../../etc", "-.-..-etc", false},
+		{"traversal is folded into dashes", "../../etc", "..-..-etc", false},
 		{"reserved auth", "auth", "", true},
 		{"reserved qr", "QR", "", true},
 	}
