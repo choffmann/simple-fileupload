@@ -263,7 +263,7 @@ func (app *App) uploadHandler(w http.ResponseWriter, r *http.Request) {
 
 	dir := r.FormValue("dir")
 
-	if err := app.store.SaveFile(username, dir, file, header.Filename); err != nil {
+	if _, err := app.store.SaveFile(username, dir, file, header.Filename); err != nil {
 		app.logger.Error("failed to save file", "error", err)
 		http.Error(w, "Failed to save file", http.StatusInternalServerError)
 		return
