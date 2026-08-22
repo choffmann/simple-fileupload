@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/rand"
 	"fmt"
 	"net/url"
 	"os"
@@ -40,4 +41,60 @@ func UploadDir() string {
 
 func UsersFile() string {
 	return strings.TrimSpace(os.Getenv("USERS_FILE"))
+}
+
+type OIDC struct {
+	Issuer       string
+	ClientID     string
+	ClientSecret string
+}
+
+// RequireOIDC reads the identity provider settings. Everything is mandatory:
+// without a provider nobody can upload anything, so guessing is pointless.
+func RequireOIDC() (OIDC, error) {
+	issuer := strings.TrimSuffix(strings.TrimSpace(os.Getenv("OIDC_ISSUER")), "/")
+	if issuer == "" {
+		return OIDC{}, fmt.Errorf("OIDC_ISSUER is not set")
+	}
+
+	u, err := url.Parse(issuer)
+	if err != nil {
+		return OIDC{}, fmt.Errorf("parsing OIDC_ISSUER %q: %w", issuer, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return OIDC{}, fmt.Errorf("OIDC_ISSUER %q needs an http or https scheme", issuer)
+	}
+	if u.Host == "" {
+		return OIDC{}, fmt.Errorf("OIDC_ISSUER %q has no host", issuer)
+	}
+
+	clientID := strings.TrimSpace(os.Getenv("OIDC_CLIENT_ID"))
+	if clientID == "" {
+		return OIDC{}, fmt.Errorf("OIDC_CLIENT_ID is not set")
+	}
+
+	clientSecret := strings.TrimSpace(os.Getenv("OIDC_CLIENT_SECRET"))
+	if clientSecret == "" {
+		return OIDC{}, fmt.Errorf("OIDC_CLIENT_SECRET is not set")
+	}
+
+	return OIDC{Issuer: issuer, ClientID: clientID, ClientSecret: clientSecret}, nil
+}
+
+// SessionSecret returns the cookie signing key. The bool reports that a random
+// key was generated because SESSION_SECRET was unset, which means every restart
+// invalidates all sessions.
+func SessionSecret() ([]byte, bool, error) {
+	if v := strings.TrimSpace(os.Getenv("SESSION_SECRET")); v != "" {
+		if len(v) < 16 {
+			return nil, false, fmt.Errorf("SESSION_SECRET needs at least 16 characters")
+		}
+		return []byte(v), false, nil
+	}
+
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return nil, false, fmt.Errorf("generating a session secret: %w", err)
+	}
+	return secret, true, nil
 }
