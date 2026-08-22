@@ -94,3 +94,17 @@ func SessionSecret() ([]byte, bool, error) {
 	}
 	return secret, true, nil
 }
+
+// Origin returns the scheme and host of a validated base url. That is what a
+// browser puts in the Origin header; BASE_URL may carry a path, an Origin never does.
+func Origin(baseURL string) (string, error) {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("parsing %q: %w", baseURL, err)
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("%q has no scheme or host", baseURL)
+	}
+
+	return u.Scheme + "://" + u.Host, nil
+}

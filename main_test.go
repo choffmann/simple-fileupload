@@ -36,6 +36,7 @@ func newTestApp(t *testing.T) *App {
 		sessions: session.NewManager([]byte("a-secret-of-decent-length"), time.Hour, false),
 		logger:   slog.New(slog.DiscardHandler),
 		baseURL:  "https://files.example.com",
+		origin:   "https://files.example.com",
 	}
 }
 
@@ -426,8 +427,11 @@ func TestMuxKeepsUploadAndMkdirBehindASession(t *testing.T) {
 	mux := app.newMux()
 
 	for _, target := range []string{"/upload", "/mkdir"} {
+		req := httptest.NewRequest("POST", target, strings.NewReader(""))
+		req.Header.Set("Origin", app.origin)
+
 		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, httptest.NewRequest("POST", target, strings.NewReader("")))
+		mux.ServeHTTP(rec, req)
 
 		if rec.Code != http.StatusSeeOther {
 			t.Errorf("%s: got status %d, want %d", target, rec.Code, http.StatusSeeOther)
@@ -463,5 +467,54 @@ func TestMuxRoutesEveryEndpoint(t *testing.T) {
 				t.Errorf("got status %d, want %d (body: %s)", rec.Code, tt.want, rec.Body)
 			}
 		})
+	}
+}
+
+func TestStateChangingRoutesRejectForeignOrigins(t *testing.T) {
+	app := newTestApp(t)
+	mux := app.newMux()
+
+	origins := []struct {
+		name   string
+		origin string
+	}{
+		{"foreign origin", "https://evil.example.com"},
+		{"missing origin", ""},
+		{"scheme downgraded", "http://files.example.com"},
+	}
+	for _, target := range []string{"/upload", "/mkdir", "/auth/logout"} {
+		for _, o := range origins {
+			t.Run(target+" "+o.name, func(t *testing.T) {
+				req := httptest.NewRequest("POST", target, strings.NewReader(""))
+				if o.origin != "" {
+					req.Header.Set("Origin", o.origin)
+				}
+				signIn(t, app, req, "alice")
+
+				rec := httptest.NewRecorder()
+				mux.ServeHTTP(rec, req)
+
+				if rec.Code != http.StatusForbidden {
+					t.Errorf("got status %d, want %d", rec.Code, http.StatusForbidden)
+				}
+			})
+		}
+	}
+}
+
+func TestLogoutAcceptsItsOwnOrigin(t *testing.T) {
+	app := newTestApp(t)
+	app.logoutURL = "https://kc.example.com/logout"
+	mux := app.newMux()
+
+	req := httptest.NewRequest("POST", "/auth/logout", nil)
+	req.Header.Set("Origin", app.origin)
+	signIn(t, app, req, "alice")
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Errorf("got status %d, want %d", rec.Code, http.StatusSeeOther)
 	}
 }
