@@ -362,3 +362,56 @@ func TestLogoutClearsTheSessionAndRedirects(t *testing.T) {
 	}
 	t.Error("logout did not expire the session cookie")
 }
+
+func TestHeaderShowsSignInWithoutSession(t *testing.T) {
+	app := newTestApp(t)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{username}/{path...}", app.browseHandler)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/alice/", nil))
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `href="/auth/login"`) {
+		t.Error("the page does not offer a sign in link")
+	}
+	if strings.Contains(body, `action="/auth/logout"`) {
+		t.Error("the page offers a sign out form without a session")
+	}
+}
+
+func TestHeaderShowsSignOutWithSession(t *testing.T) {
+	app := newTestApp(t)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{username}/{path...}", app.browseHandler)
+
+	req := httptest.NewRequest("GET", "/alice/", nil)
+	signIn(t, app, req, "alice")
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `action="/auth/logout"`) {
+		t.Error("the page does not offer a sign out form")
+	}
+	if strings.Contains(body, `href="/auth/login"`) {
+		t.Error("the page still offers a sign in link with a session")
+	}
+}
+
+func TestQRPageShowsTheSignedInUser(t *testing.T) {
+	app := newTestApp(t)
+
+	req := httptest.NewRequest("GET", "/qr/alice/", nil)
+	signIn(t, app, req, "alice")
+
+	rec := httptest.NewRecorder()
+	qrMux(app).ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), `action="/auth/logout"`) {
+		t.Error("the qr page does not carry the session header")
+	}
+}
