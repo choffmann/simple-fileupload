@@ -19,12 +19,9 @@ func AreaName(claim string) (string, error) {
 	}
 
 	var b strings.Builder
-	claim = strings.ToLower(claim)
-	for i, r := range claim {
+	for _, r := range strings.ToLower(claim) {
 		switch {
-		case i == 0 && r == '.':
-			b.WriteRune('-')
-		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-':
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
 			b.WriteRune(r)
 		default:
 			b.WriteRune('-')
@@ -32,7 +29,7 @@ func AreaName(claim string) (string, error) {
 	}
 
 	name := b.String()
-	if strings.TrimFunc(name, func(r rune) bool { return r == '.' || r == '-' }) == "" || reservedAreaNames[name] {
+	if name == "." || name == ".." || reservedAreaNames[name] {
 		return "", fmt.Errorf("preferred_username %q is not a usable area name", claim)
 	}
 
