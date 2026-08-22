@@ -358,11 +358,11 @@ func (app *App) mkdirHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	redirectPath := "/" + username + "/"
-	if dir != "" {
-		redirectPath = "/" + username + "/" + dir + "/"
+	parent := ""
+	if trimmed := strings.Trim(dir, "/"); trimmed != "" {
+		parent = trimmed + "/"
 	}
-	http.Redirect(w, r, redirectPath, http.StatusSeeOther)
+	http.Redirect(w, r, publicurl.Path(username, parent), http.StatusSeeOther)
 }
 
 func (app *App) qrHandler(w http.ResponseWriter, r *http.Request) {
