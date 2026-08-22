@@ -6,6 +6,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -546,5 +547,38 @@ func TestDirectoryListingIsNotLockedDown(t *testing.T) {
 
 	if got := rec.Header().Get("Content-Security-Policy"); got != "" {
 		t.Errorf("the browse page carries a Content-Security-Policy %q, which would break its own markup", got)
+	}
+}
+
+func TestMkdirRedirectEscapesThePath(t *testing.T) {
+	tests := []struct {
+		name string
+		dir  string
+		want string
+	}{
+		{"root of the area", "", "/alice/"},
+		{"directory with a space", "alte fotos", "/alice/alte%20fotos/"},
+		{"directory with a hash", "a#b", "/alice/a%23b/"},
+		{"directory with a question mark", "a?b", "/alice/a%3Fb/"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := newTestApp(t)
+
+			form := url.Values{"dir": {tt.dir}, "name": {"neuer ordner"}}
+			req := httptest.NewRequest("POST", "/mkdir", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			signIn(t, app, req, "alice")
+
+			rec := httptest.NewRecorder()
+			app.requireUser(http.HandlerFunc(app.mkdirHandler)).ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusSeeOther {
+				t.Fatalf("got status %d, want %d (body: %s)", rec.Code, http.StatusSeeOther, rec.Body)
+			}
+			if got := rec.Header().Get("Location"); got != tt.want {
+				t.Errorf("got Location %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
