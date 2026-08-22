@@ -39,10 +39,6 @@ func UploadDir() string {
 	return v
 }
 
-func UsersFile() string {
-	return strings.TrimSpace(os.Getenv("USERS_FILE"))
-}
-
 type OIDC struct {
 	Issuer       string
 	ClientID     string

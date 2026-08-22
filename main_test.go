@@ -10,8 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/choffmann/simple-fileupload/internal/auth"
+	"github.com/choffmann/simple-fileupload/internal/session"
 	"github.com/choffmann/simple-fileupload/internal/storage"
 )
 
@@ -31,11 +32,22 @@ func newTestApp(t *testing.T) *App {
 	}
 
 	return &App{
-		store:   store,
-		users:   auth.SingleUser("alice", "secret"),
-		logger:  slog.New(slog.DiscardHandler),
-		baseURL: "https://files.example.com",
+		store:    store,
+		sessions: session.NewManager([]byte("a-secret-of-decent-length"), time.Hour, false),
+		logger:   slog.New(slog.DiscardHandler),
+		baseURL:  "https://files.example.com",
 	}
+}
+
+func signIn(t *testing.T, app *App, req *http.Request, username string) *http.Request {
+	t.Helper()
+
+	rec := httptest.NewRecorder()
+	app.sessions.Issue(rec, username)
+	for _, c := range rec.Result().Cookies() {
+		req.AddCookie(c)
+	}
+	return req
 }
 
 func qrMux(app *App) *http.ServeMux {
@@ -155,10 +167,10 @@ func TestUploadRedirectsToQRPage(t *testing.T) {
 
 			req := httptest.NewRequest("POST", "/upload", body)
 			req.Header.Set("Content-Type", writer.FormDataContentType())
-			req.SetBasicAuth("alice", "secret")
+			signIn(t, app, req, "alice")
 
 			rec := httptest.NewRecorder()
-			app.authMiddleware(http.HandlerFunc(app.uploadHandler)).ServeHTTP(rec, req)
+			app.requireUser(http.HandlerFunc(app.uploadHandler)).ServeHTTP(rec, req)
 
 			if rec.Code != http.StatusSeeOther {
 				t.Fatalf("got status %d, want %d (body: %s)", rec.Code, http.StatusSeeOther, rec.Body)
@@ -197,4 +209,50 @@ func TestBrowseHandlerEscapesLinks(t *testing.T) {
 			t.Errorf("body is missing %s", want)
 		}
 	}
+}
+
+func TestUploadWithoutSessionRedirectsToLogin(t *testing.T) {
+	app := newTestApp(t)
+
+	req := httptest.NewRequest("POST", "/upload", strings.NewReader(""))
+	rec := httptest.NewRecorder()
+	app.requireUser(http.HandlerFunc(app.uploadHandler)).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusSeeOther)
+	}
+	if got := rec.Header().Get("Location"); got != "/auth/login" {
+		t.Errorf("got Location %q, want %q", got, "/auth/login")
+	}
+}
+
+func TestBrowseShowsUploadFormOnlyToTheOwner(t *testing.T) {
+	app := newTestApp(t)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{username}/{path...}", app.browseHandler)
+
+	t.Run("owner sees the form", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/alice/", nil)
+		signIn(t, app, req, "alice")
+
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if !strings.Contains(rec.Body.String(), `action="/upload"`) {
+			t.Error("the owner does not see the upload form")
+		}
+	})
+
+	t.Run("a stranger does not", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/alice/", nil)
+		signIn(t, app, req, "bob")
+
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if strings.Contains(rec.Body.String(), `action="/upload"`) {
+			t.Error("a stranger sees the upload form")
+		}
+	})
 }
