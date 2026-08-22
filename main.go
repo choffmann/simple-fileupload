@@ -12,6 +12,7 @@ import (
 
 	"github.com/choffmann/simple-fileupload/internal/auth"
 	"github.com/choffmann/simple-fileupload/internal/config"
+	"github.com/choffmann/simple-fileupload/internal/publicurl"
 	"github.com/choffmann/simple-fileupload/internal/qr"
 	"github.com/choffmann/simple-fileupload/internal/storage"
 )
@@ -27,13 +28,20 @@ type ctxKey string
 const ctxUsername ctxKey = "username"
 
 type App struct {
-	store  *storage.Storage
-	users  []auth.User
-	logger *slog.Logger
+	store   *storage.Storage
+	users   []auth.User
+	logger  *slog.Logger
+	baseURL string
 }
 
 func main() {
 	logger := config.NewLogger()
+
+	baseURL, err := config.RequireBaseURL()
+	if err != nil {
+		logger.Error("invalid configuration", "error", err)
+		os.Exit(1)
+	}
 
 	users, err := loadUsers(logger)
 	if err != nil {
@@ -50,7 +58,7 @@ func main() {
 		}
 	}
 
-	app := &App{store: store, users: users, logger: logger}
+	app := &App{store: store, users: users, logger: logger, baseURL: baseURL}
 
 	mux := http.NewServeMux()
 
@@ -313,16 +321,16 @@ func (app *App) qrHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := app.store.IsDir(username, subpath)
-	if err != nil {
+	if _, err := app.store.IsDir(username, subpath); err != nil {
 		http.NotFound(w, r)
 		return
 	}
 
-	baseURL := config.BaseURL()
-	publicURL := baseURL + "/" + username + "/"
-	if subpath != "" {
-		publicURL += subpath
+	publicURL, err := publicurl.For(app.baseURL, username, subpath)
+	if err != nil {
+		app.logger.Error("failed to build public url", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
 	}
 
 	png, err := qr.Generate(publicURL, 256)
