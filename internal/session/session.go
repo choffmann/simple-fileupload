@@ -20,6 +20,9 @@ type Manager struct {
 }
 
 func NewManager(secret []byte, ttl time.Duration, secure bool) *Manager {
+	if len(secret) == 0 {
+		panic("session: empty secret")
+	}
 	return &Manager{secret: secret, ttl: ttl, secure: secure}
 }
 
@@ -31,7 +34,7 @@ func (m *Manager) Issue(w http.ResponseWriter, username string) {
 		Value:    m.sign(username, expiry),
 		Path:     "/",
 		Expires:  expiry,
-		MaxAge:   int(m.ttl.Seconds()),
+		MaxAge:   int(m.ttl / time.Second),
 		HttpOnly: true,
 		Secure:   m.secure,
 		// Lax is required: Strict would drop the cookie on the top-level
