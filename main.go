@@ -10,11 +10,12 @@ import (
 	"os"
 	"path"
 	"strings"
+	"time"
 
-	"github.com/choffmann/simple-fileupload/internal/auth"
 	"github.com/choffmann/simple-fileupload/internal/config"
 	"github.com/choffmann/simple-fileupload/internal/publicurl"
 	"github.com/choffmann/simple-fileupload/internal/qr"
+	"github.com/choffmann/simple-fileupload/internal/session"
 	"github.com/choffmann/simple-fileupload/internal/storage"
 )
 
@@ -30,10 +31,11 @@ type ctxKey string
 const ctxUsername ctxKey = "username"
 
 type App struct {
-	store   *storage.Storage
-	users   []auth.User
-	logger  *slog.Logger
-	baseURL string
+	store         *storage.Storage
+	sessions      *session.Manager
+	logger        *slog.Logger
+	baseURL       string
+	secureCookies bool
 }
 
 func main() {
@@ -45,74 +47,46 @@ func main() {
 		os.Exit(1)
 	}
 
-	users, err := loadUsers(logger)
+	secret, generated, err := config.SessionSecret()
 	if err != nil {
-		logger.Error("failed to load users", "error", err)
+		logger.Error("invalid configuration", "error", err)
 		os.Exit(1)
 	}
-
-	store := storage.New(config.UploadDir())
-
-	for _, u := range users {
-		if err := store.EnsureUserDir(u.Username); err != nil {
-			logger.Error("failed to create user directory", "user", u.Username, "error", err)
-			os.Exit(1)
-		}
+	if generated {
+		logger.Warn("SESSION_SECRET is not set, using a random one; every restart signs all users out")
 	}
 
-	app := &App{store: store, users: users, logger: logger, baseURL: baseURL}
+	secureCookies := strings.HasPrefix(baseURL, "https://")
+
+	app := &App{
+		store:         storage.New(config.UploadDir()),
+		sessions:      session.NewManager(secret, 12*time.Hour, secureCookies),
+		logger:        logger,
+		baseURL:       baseURL,
+		secureCookies: secureCookies,
+	}
 
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /{$}", app.indexHandler)
 	mux.HandleFunc("GET /{username}/{path...}", app.browseHandler)
 	mux.HandleFunc("GET /qr/{username}/{path...}", app.qrHandler)
-	mux.Handle("POST /upload", app.authMiddleware(http.HandlerFunc(app.uploadHandler)))
-	mux.Handle("POST /mkdir", app.authMiddleware(http.HandlerFunc(app.mkdirHandler)))
+	mux.Handle("POST /upload", app.requireUser(http.HandlerFunc(app.uploadHandler)))
+	mux.Handle("POST /mkdir", app.requireUser(http.HandlerFunc(app.mkdirHandler)))
 
 	logger.Info("starting server on :8080")
 	http.ListenAndServe(":8080", mux)
 }
 
-func loadUsers(logger *slog.Logger) ([]auth.User, error) {
-	if f := config.UsersFile(); f != "" {
-		logger.Info("loading users from file", "path", f)
-		return auth.LoadUsers(f)
-	}
-
-	username := os.Getenv("BASIC_AUTH_USERNAME")
-	password := os.Getenv("BASIC_AUTH_PASSWORD")
-	if username != "" && password != "" {
-		logger.Info("using single user from environment")
-		return auth.SingleUser(username, password), nil
-	}
-
-	logger.Warn("no authentication configured, set USERS_FILE or BASIC_AUTH_USERNAME/BASIC_AUTH_PASSWORD")
-	return nil, nil
-}
-
-func (app *App) authMiddleware(next http.Handler) http.Handler {
+func (app *App) requireUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if len(app.users) == 0 {
-			next.ServeHTTP(w, r)
+		username := app.sessions.Username(r)
+		if username == "" {
+			http.Redirect(w, r, "/auth/login", http.StatusSeeOther)
 			return
 		}
 
-		username, password, ok := r.BasicAuth()
-		if !ok {
-			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted", charset="UTF-8"`)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		user, valid := auth.Authenticate(app.users, username, password)
-		if !valid {
-			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted", charset="UTF-8"`)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		ctx := context.WithValue(r.Context(), ctxUsername, user.Username)
+		ctx := context.WithValue(r.Context(), ctxUsername, username)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -122,21 +96,9 @@ func usernameFromContext(ctx context.Context) string {
 	return v
 }
 
-// tryAuth checks Basic Auth credentials without rejecting unauthenticated requests.
-func (app *App) tryAuth(r *http.Request) string {
-	username, password, ok := r.BasicAuth()
-	if !ok {
-		return ""
-	}
-	if user, valid := auth.Authenticate(app.users, username, password); valid {
-		return user.Username
-	}
-	return ""
-}
-
 func (app *App) indexHandler(w http.ResponseWriter, r *http.Request) {
-	if username := app.tryAuth(r); username != "" {
-		http.Redirect(w, r, "/"+username+"/", http.StatusFound)
+	if username := app.sessions.Username(r); username != "" {
+		http.Redirect(w, r, publicurl.Path(username, ""), http.StatusFound)
 		return
 	}
 
@@ -259,7 +221,7 @@ func (app *App) browseHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	authUser := app.tryAuth(r)
+	authUser := app.sessions.Username(r)
 
 	viewEntries := make([]BrowseEntry, 0, len(entries))
 	for _, e := range entries {
