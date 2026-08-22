@@ -6,7 +6,12 @@ FROM golang:1.25-alpine AS builder
 WORKDIR /app
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-s -w" -o simple-fileupload .
+ARG VERSION=dev
+ARG REVISION=unknown
+
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags "-s -w -X main.version=${VERSION} -X main.revision=${REVISION}" \
+    -o simple-fileupload .
 
 #############################################
 # Runner go

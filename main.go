@@ -30,6 +30,12 @@ var indexTemplate = template.Must(template.ParseFS(templateFS, "templates/base.t
 var browseTemplate = template.Must(template.ParseFS(templateFS, "templates/base.tmpl.html", "templates/browse.tmpl.html"))
 var qrTemplate = template.Must(template.ParseFS(templateFS, "templates/base.tmpl.html", "templates/qr.tmpl.html"))
 
+// set via -ldflags at image build time
+var (
+	version  = "dev"
+	revision = "unknown"
+)
+
 type ctxKey string
 
 const ctxUsername ctxKey = "username"
@@ -101,7 +107,7 @@ func main() {
 		secureCookies: secureCookies,
 	}
 
-	logger.Info("starting server on :8080")
+	logger.Info("starting server on :8080", "version", version, "revision", revision)
 	if err := http.ListenAndServe(":8080", app.newMux()); err != nil {
 		logger.Error("server stopped", "error", err)
 		os.Exit(1)
