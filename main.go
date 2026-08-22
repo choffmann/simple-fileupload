@@ -173,6 +173,7 @@ type Breadcrumb struct {
 
 type QRData struct {
 	PageTitle   string
+	Username    string
 	Heading     string
 	PublicURL   string
 	ImageURL    string
@@ -265,7 +266,7 @@ func (app *App) browseHandler(w http.ResponseWriter, r *http.Request) {
 
 	data := BrowseData{
 		PageTitle:        username + " — Files",
-		Username:         username,
+		Username:         authUser,
 		IsOwner:          authUser == username,
 		CurrentPath:      currentPath,
 		CurrentPathSlash: currentPathSlash,
@@ -392,6 +393,7 @@ func (app *App) qrHandler(w http.ResponseWriter, r *http.Request) {
 
 	qrTemplate.ExecuteTemplate(w, "base", QRData{
 		PageTitle:   "QR — " + name,
+		Username:    app.sessions.Username(r),
 		Heading:     name,
 		PublicURL:   publicURL,
 		ImageURL:    escaped + "?format=png",
