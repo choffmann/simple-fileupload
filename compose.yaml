@@ -1,0 +1,66 @@
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7
+    command:
+      - --verbose
+      - start-dev
+      - --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN_USER:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:-admin}
+      KC_DB: postgres
+      KC_DB_USERNAME: ${POSTGRES_USER:-postgres}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      KC_DB_URL: jdbc:postgresql://db:5432/keycloak
+      # pins the discovery issuer, so the browser and the go process on the host
+      # both see http://localhost:8081/realms/... and the id_token verifies
+      KC_HOSTNAME: http://localhost:8081
+      KC_HTTP_ENABLED: true
+      KC_HTTP_PORT: 8081
+      KC_HTTP_MANAGEMENT_PORT: 9000
+      KC_HEALTH_ENABLED: true
+      KC_LOG_LEVEL: INFO
+    ports:
+      - "127.0.0.1:8081:8081"
+    volumes:
+      - "./.docker/keycloak/simple-fileupload-realm.json:/opt/keycloak/data/import/simple-fileupload-realm.json:ro"
+    healthcheck:
+      # the image ships neither curl nor wget, so this talks http over /dev/tcp
+      test:
+        - "CMD"
+        - "/bin/bash"
+        - "-c"
+        - |
+          exec 3<>/dev/tcp/localhost/9000;
+          echo -e "GET /health/ready HTTP/1.1\r\nhost: localhost\r\nConnection: close\r\n\r\n" >&3;
+          while IFS= read -r line; do
+              if [[ "$$line" =~ "200 OK" ]]; then
+                  exit 0;
+              fi
+          done <&3;
+          exit 1;
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: keycloak
+    healthcheck:
+      test: pg_isready -U $$POSTGRES_USER -d keycloak -h localhost
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      # postgres:18 moved PGDATA to /var/lib/postgresql/18/docker, mounting the
+      # old .../data path would silently leave the real data in an anonymous volume
+      - db_data:/var/lib/postgresql
+
+volumes:
+  db_data:
