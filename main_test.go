@@ -415,3 +415,19 @@ func TestQRPageShowsTheSignedInUser(t *testing.T) {
 		t.Error("the qr page does not carry the session header")
 	}
 }
+
+func TestBrowseRejectsEncodedTraversalInTheUsername(t *testing.T) {
+	app := newTestApp(t)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{username}/{path...}", app.browseHandler)
+
+	for _, target := range []string{"/..%2f..%2fetc/", "/..%2f/", "/alice%2f..%2f..%2fetc/"} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest("GET", target, nil))
+
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s: got status %d, want %d (body: %s)", target, rec.Code, http.StatusNotFound, rec.Body)
+		}
+	}
+}
