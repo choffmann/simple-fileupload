@@ -83,9 +83,15 @@ func (s *Storage) SaveFile(username, subpath string, file io.Reader, filename st
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if _, err := io.Copy(f, file); err != nil {
+		return "", err
+	}
+	// close before returning success: a close error on a written file means the
+	// upload may never have reached the disk. the defer above only covers the
+	// error paths and swallows the second close.
+	if err := f.Close(); err != nil {
 		return "", err
 	}
 	return cleanName, nil

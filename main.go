@@ -102,7 +102,10 @@ func main() {
 	}
 
 	logger.Info("starting server on :8080")
-	http.ListenAndServe(":8080", app.newMux())
+	if err := http.ListenAndServe(":8080", app.newMux()); err != nil {
+		logger.Error("server stopped", "error", err)
+		os.Exit(1)
+	}
 }
 
 func (app *App) newMux() *http.ServeMux {
@@ -164,14 +167,16 @@ func (app *App) indexHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	indexTemplate.ExecuteTemplate(w, "base", struct {
+	if err := indexTemplate.ExecuteTemplate(w, "base", struct {
 		PageTitle string
 		Username  string
 		Users     []string
 	}{
 		PageTitle: "Areas",
 		Users:     users,
-	})
+	}); err != nil {
+		app.logger.Error("failed to render the index page", "error", err)
+	}
 }
 
 type BrowseData struct {
@@ -306,7 +311,9 @@ func (app *App) browseHandler(w http.ResponseWriter, r *http.Request) {
 		Entries:          viewEntries,
 	}
 
-	browseTemplate.ExecuteTemplate(w, "base", data)
+	if err := browseTemplate.ExecuteTemplate(w, "base", data); err != nil {
+		app.logger.Error("failed to render the browse page", "error", err)
+	}
 }
 
 func (app *App) uploadHandler(w http.ResponseWriter, r *http.Request) {
@@ -318,7 +325,7 @@ func (app *App) uploadHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	dir := r.FormValue("dir")
 
@@ -421,7 +428,7 @@ func (app *App) qrHandler(w http.ResponseWriter, r *http.Request) {
 
 	escaped := r.URL.EscapedPath()
 
-	qrTemplate.ExecuteTemplate(w, "base", QRData{
+	if err := qrTemplate.ExecuteTemplate(w, "base", QRData{
 		PageTitle:   "QR — " + name,
 		Username:    app.sessions.Username(r),
 		Heading:     name,
@@ -430,7 +437,9 @@ func (app *App) qrHandler(w http.ResponseWriter, r *http.Request) {
 		DownloadURL: escaped + "?format=png&download=1",
 		BackURL:     publicurl.Path(username, backPath),
 		BackLabel:   backLabel,
-	})
+	}); err != nil {
+		app.logger.Error("failed to render the qr page", "error", err)
+	}
 }
 
 func (app *App) serveQRImage(w http.ResponseWriter, r *http.Request, username, subpath, publicURL string) {
@@ -455,7 +464,7 @@ func (app *App) serveQRImage(w http.ResponseWriter, r *http.Request, username, s
 		}
 	}
 
-	w.Write(png)
+	_, _ = w.Write(png)
 }
 
 const stateCookieName = "oidc_state"
