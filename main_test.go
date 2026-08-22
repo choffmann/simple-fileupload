@@ -130,43 +130,55 @@ func TestQRHandlerDirectoryURLKeepsTrailingSlash(t *testing.T) {
 	}
 }
 
-func TestUploadRedirectsToQRPage(t *testing.T) {
+type uploadFile struct {
+	name    string
+	content string
+}
+
+func postUpload(t *testing.T, app *App, dir string, files ...uploadFile) *httptest.ResponseRecorder {
+	t.Helper()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	if err := writer.WriteField("dir", dir); err != nil {
+		t.Fatalf("WriteField: %v", err)
+	}
+	for _, f := range files {
+		part, err := writer.CreateFormFile("file", f.name)
+		if err != nil {
+			t.Fatalf("CreateFormFile: %v", err)
+		}
+		if _, err := part.Write([]byte(f.content)); err != nil {
+			t.Fatalf("writing part: %v", err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("closing writer: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/upload", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	signIn(t, app, req, "alice")
+
+	rec := httptest.NewRecorder()
+	app.requireUser(http.HandlerFunc(app.uploadHandler)).ServeHTTP(rec, req)
+	return rec
+}
+
+func TestUploadRedirectsToTheTargetFolder(t *testing.T) {
 	tests := []struct {
-		name     string
-		dir      string
-		filename string
-		want     string
+		name string
+		dir  string
+		want string
 	}{
-		{"root of the area", "", "foo.pdf", "/qr/alice/foo.pdf"},
-		{"subdirectory with spaces", "alte fotos", "Übung 1.pdf", "/qr/alice/alte%20fotos/%C3%9Cbung%201.pdf"},
-		{"sanitized filename", "", "../evil.txt", "/qr/alice/evil.txt"},
+		{"root of the area", "", "/alice/"},
+		{"subdirectory with spaces", "alte fotos", "/alice/alte%20fotos/"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			app := newTestApp(t)
 
-			body := &bytes.Buffer{}
-			writer := multipart.NewWriter(body)
-			if err := writer.WriteField("dir", tt.dir); err != nil {
-				t.Fatalf("WriteField: %v", err)
-			}
-			part, err := writer.CreateFormFile("file", tt.filename)
-			if err != nil {
-				t.Fatalf("CreateFormFile: %v", err)
-			}
-			if _, err := part.Write([]byte("payload")); err != nil {
-				t.Fatalf("writing part: %v", err)
-			}
-			if err := writer.Close(); err != nil {
-				t.Fatalf("closing writer: %v", err)
-			}
-
-			req := httptest.NewRequest("POST", "/upload", body)
-			req.Header.Set("Content-Type", writer.FormDataContentType())
-			signIn(t, app, req, "alice")
-
-			rec := httptest.NewRecorder()
-			app.requireUser(http.HandlerFunc(app.uploadHandler)).ServeHTTP(rec, req)
+			rec := postUpload(t, app, tt.dir, uploadFile{"foo.pdf", "payload"})
 
 			if rec.Code != http.StatusSeeOther {
 				t.Fatalf("got status %d, want %d (body: %s)", rec.Code, http.StatusSeeOther, rec.Body)
@@ -175,6 +187,41 @@ func TestUploadRedirectsToQRPage(t *testing.T) {
 				t.Errorf("got Location %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestUploadSavesEverySelectedFile(t *testing.T) {
+	app := newTestApp(t)
+
+	rec := postUpload(t, app, "alte fotos",
+		uploadFile{"a.txt", "first"},
+		uploadFile{"../evil.txt", "second"},
+		uploadFile{"Übung 2.pdf", "third"},
+	)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("got status %d, want %d (body: %s)", rec.Code, http.StatusSeeOther, rec.Body)
+	}
+
+	want := map[string]string{"a.txt": "first", "evil.txt": "second", "Übung 2.pdf": "third"}
+	for name, content := range want {
+		got, err := os.ReadFile(filepath.Join(app.store.BaseDir, "alice", "alte fotos", name))
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", name, err)
+		}
+		if string(got) != content {
+			t.Errorf("%s contains %q, want %q", name, got, content)
+		}
+	}
+}
+
+func TestUploadWithoutAFileIsRejected(t *testing.T) {
+	app := newTestApp(t)
+
+	rec := postUpload(t, app, "")
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got status %d, want %d (body: %s)", rec.Code, http.StatusBadRequest, rec.Body)
 	}
 }
 
@@ -235,6 +282,9 @@ func TestBrowseShowsUploadFormOnlyToTheOwner(t *testing.T) {
 
 		if !strings.Contains(rec.Body.String(), `action="/upload"`) {
 			t.Error("the owner does not see the upload form")
+		}
+		if !strings.Contains(rec.Body.String(), `type="file" name="file" multiple`) {
+			t.Error("the upload form does not allow picking several files")
 		}
 	})
 
