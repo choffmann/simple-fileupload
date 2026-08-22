@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
 	"embed"
+	"encoding/base64"
 	"html/template"
 	"log/slog"
 	"mime"
@@ -13,6 +16,7 @@ import (
 	"time"
 
 	"github.com/choffmann/simple-fileupload/internal/config"
+	appoidc "github.com/choffmann/simple-fileupload/internal/oidc"
 	"github.com/choffmann/simple-fileupload/internal/publicurl"
 	"github.com/choffmann/simple-fileupload/internal/qr"
 	"github.com/choffmann/simple-fileupload/internal/session"
@@ -33,9 +37,14 @@ const ctxUsername ctxKey = "username"
 type App struct {
 	store         *storage.Storage
 	sessions      *session.Manager
+	oidc          *appoidc.Provider
 	logger        *slog.Logger
 	baseURL       string
 	secureCookies bool
+
+	// test seams: when set they replace the urls computed from the provider
+	authorizeURL string
+	logoutURL    string
 }
 
 func main() {
@@ -58,9 +67,27 @@ func main() {
 
 	secureCookies := strings.HasPrefix(baseURL, "https://")
 
+	oidcCfg, err := config.RequireOIDC()
+	if err != nil {
+		logger.Error("invalid configuration", "error", err)
+		os.Exit(1)
+	}
+
+	provider, err := appoidc.New(context.Background(), appoidc.Config{
+		Issuer:       oidcCfg.Issuer,
+		ClientID:     oidcCfg.ClientID,
+		ClientSecret: oidcCfg.ClientSecret,
+		RedirectURL:  baseURL + "/auth/callback",
+	})
+	if err != nil {
+		logger.Error("failed to reach the identity provider", "error", err)
+		os.Exit(1)
+	}
+
 	app := &App{
 		store:         storage.New(config.UploadDir()),
 		sessions:      session.NewManager(secret, 12*time.Hour, secureCookies),
+		oidc:          provider,
 		logger:        logger,
 		baseURL:       baseURL,
 		secureCookies: secureCookies,
@@ -73,6 +100,9 @@ func main() {
 	mux.HandleFunc("GET /qr/{username}/{path...}", app.qrHandler)
 	mux.Handle("POST /upload", app.requireUser(http.HandlerFunc(app.uploadHandler)))
 	mux.Handle("POST /mkdir", app.requireUser(http.HandlerFunc(app.mkdirHandler)))
+	mux.HandleFunc("GET /auth/login", app.loginHandler)
+	mux.HandleFunc("GET /auth/callback", app.callbackHandler)
+	mux.HandleFunc("POST /auth/logout", app.logoutHandler)
 
 	logger.Info("starting server on :8080")
 	http.ListenAndServe(":8080", mux)
@@ -394,4 +424,113 @@ func (app *App) serveQRImage(w http.ResponseWriter, r *http.Request, username, s
 	}
 
 	w.Write(png)
+}
+
+const stateCookieName = "oidc_state"
+
+const stateCookieTTL = 10 * time.Minute
+
+func randomToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+func (app *App) writeStateCookie(w http.ResponseWriter, value string, maxAge int) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     stateCookieName,
+		Value:    value,
+		Path:     "/",
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		Secure:   app.secureCookies,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func (app *App) loginHandler(w http.ResponseWriter, r *http.Request) {
+	state, err := randomToken()
+	if err != nil {
+		app.logger.Error("failed to generate the login state", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	nonce, err := randomToken()
+	if err != nil {
+		app.logger.Error("failed to generate the login nonce", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	app.writeStateCookie(w, state+"."+nonce, int(stateCookieTTL.Seconds()))
+
+	target := app.authorizeURL
+	if target == "" {
+		target = app.oidc.AuthCodeURL(state, nonce)
+	}
+	http.Redirect(w, r, target, http.StatusFound)
+}
+
+func (app *App) callbackHandler(w http.ResponseWriter, r *http.Request) {
+	// the state is single use, so it goes regardless of how this ends
+	app.writeStateCookie(w, "", -1)
+
+	cookie, err := r.Cookie(stateCookieName)
+	if err != nil {
+		app.logger.Warn("callback without a state cookie")
+		http.Error(w, "Your login expired, please try again", http.StatusBadRequest)
+		return
+	}
+
+	state, nonce, ok := strings.Cut(cookie.Value, ".")
+	if !ok || state == "" {
+		app.logger.Warn("callback with a malformed state cookie")
+		http.Error(w, "Your login expired, please try again", http.StatusBadRequest)
+		return
+	}
+
+	if subtle.ConstantTimeCompare([]byte(state), []byte(r.URL.Query().Get("state"))) != 1 {
+		app.logger.Warn("callback with a mismatched state")
+		http.Error(w, "Invalid login state", http.StatusBadRequest)
+		return
+	}
+
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		app.logger.Warn("callback without an authorization code")
+		http.Error(w, "Missing authorization code", http.StatusBadRequest)
+		return
+	}
+
+	identity, err := app.oidc.Exchange(r.Context(), code, nonce)
+	if err != nil {
+		app.logger.Error("login failed", "error", err)
+		http.Error(w, "Login failed", http.StatusBadRequest)
+		return
+	}
+
+	if err := app.store.EnsureUserDir(identity.Username); err != nil {
+		app.logger.Error("failed to create the user directory", "user", identity.Username, "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	app.sessions.Issue(w, identity.Username)
+	app.logger.Info("user signed in", "user", identity.Username)
+
+	http.Redirect(w, r, publicurl.Path(identity.Username, ""), http.StatusSeeOther)
+}
+
+func (app *App) logoutHandler(w http.ResponseWriter, r *http.Request) {
+	app.sessions.Clear(w)
+	app.writeStateCookie(w, "", -1)
+
+	target := app.logoutURL
+	if target == "" {
+		target = app.oidc.LogoutURL(app.baseURL)
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
