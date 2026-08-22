@@ -163,9 +163,15 @@ type BrowseData struct {
 	CurrentPath      string
 	CurrentPathSlash string
 	HasParent        bool
-	ParentPath       string
+	ParentHref       string
 	Breadcrumbs      []Breadcrumb
-	Entries          []storage.Entry
+	Entries          []BrowseEntry
+}
+
+type BrowseEntry struct {
+	storage.Entry
+	Href   string
+	QRHref string
 }
 
 type Breadcrumb struct {
@@ -186,7 +192,7 @@ type QRData struct {
 func buildBreadcrumbs(username, p string) []Breadcrumb {
 	p = strings.Trim(p, "/")
 
-	crumbs := []Breadcrumb{{Name: username, Path: "/" + username + "/"}}
+	crumbs := []Breadcrumb{{Name: username, Path: publicurl.Path(username, "")}}
 
 	if p == "" {
 		return crumbs
@@ -196,7 +202,7 @@ func buildBreadcrumbs(username, p string) []Breadcrumb {
 	for i, part := range parts {
 		crumbs = append(crumbs, Breadcrumb{
 			Name: part,
-			Path: "/" + username + "/" + strings.Join(parts[:i+1], "/") + "/",
+			Path: publicurl.Path(username, strings.Join(parts[:i+1], "/")+"/"),
 		})
 	}
 	return crumbs
@@ -255,6 +261,16 @@ func (app *App) browseHandler(w http.ResponseWriter, r *http.Request) {
 
 	authUser := app.tryAuth(r)
 
+	viewEntries := make([]BrowseEntry, 0, len(entries))
+	for _, e := range entries {
+		sub := currentPathSlash + e.Name
+		if e.IsDir {
+			sub += "/"
+		}
+		p := publicurl.Path(username, sub)
+		viewEntries = append(viewEntries, BrowseEntry{Entry: e, Href: p, QRHref: "/qr" + p})
+	}
+
 	data := BrowseData{
 		PageTitle:        username + " — Files",
 		Username:         username,
@@ -262,9 +278,9 @@ func (app *App) browseHandler(w http.ResponseWriter, r *http.Request) {
 		CurrentPath:      currentPath,
 		CurrentPathSlash: currentPathSlash,
 		HasParent:        hasParent,
-		ParentPath:       parentPath,
+		ParentHref:       publicurl.Path(username, parentPath),
 		Breadcrumbs:      buildBreadcrumbs(username, currentPath),
-		Entries:          entries,
+		Entries:          viewEntries,
 	}
 
 	browseTemplate.ExecuteTemplate(w, "base", data)
