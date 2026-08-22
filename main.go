@@ -27,15 +27,34 @@ import (
 //go:embed templates/*
 var templateFS embed.FS
 
-var indexTemplate = template.Must(template.ParseFS(templateFS, "templates/base.tmpl.html", "templates/index.tmpl.html"))
-var browseTemplate = template.Must(template.ParseFS(templateFS, "templates/base.tmpl.html", "templates/browse.tmpl.html"))
-var qrTemplate = template.Must(template.ParseFS(templateFS, "templates/base.tmpl.html", "templates/qr.tmpl.html"))
+var indexTemplate = parseTemplate("templates/index.tmpl.html")
+var browseTemplate = parseTemplate("templates/browse.tmpl.html")
+var qrTemplate = parseTemplate("templates/qr.tmpl.html")
+
+func parseTemplate(page string) *template.Template {
+	return template.Must(template.New(path.Base(page)).
+		Funcs(template.FuncMap{"buildInfo": buildInfo}).
+		ParseFS(templateFS, "templates/base.tmpl.html", page))
+}
 
 // set via -ldflags at image build time
 var (
 	version  = "dev"
 	revision = "unknown"
 )
+
+func buildInfo() string {
+	short := revision
+	if len(short) > 7 {
+		short = short[:7]
+	}
+
+	// release tags arrive without the v, but the fallback "dev" must not become "vdev"
+	if version != "" && version[0] >= '0' && version[0] <= '9' {
+		return "v" + version + " (" + short + ")"
+	}
+	return version + " (" + short + ")"
+}
 
 type ctxKey string
 

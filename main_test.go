@@ -632,3 +632,52 @@ func TestMkdirRedirectEscapesThePath(t *testing.T) {
 		})
 	}
 }
+
+func setBuildInfo(t *testing.T, v, rev string) {
+	t.Helper()
+
+	oldVersion, oldRevision := version, revision
+	version, revision = v, rev
+	t.Cleanup(func() { version, revision = oldVersion, oldRevision })
+}
+
+func TestFooterShowsTheBuildVersionOnEveryPage(t *testing.T) {
+	setBuildInfo(t, "1.2.3", "abc1234def5678")
+
+	for _, path := range []string{"/", "/alice/", "/qr/alice/"} {
+		t.Run(path, func(t *testing.T) {
+			app := newTestApp(t)
+
+			rec := httptest.NewRecorder()
+			app.newMux().ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+
+			body := rec.Body.String()
+			if !strings.Contains(body, "v1.2.3 (abc1234)") {
+				t.Errorf("the footer does not show the build version, body: %s", body)
+			}
+			if strings.Contains(body, "abc1234def5678") {
+				t.Error("the footer shows the full revision instead of a short one")
+			}
+		})
+	}
+}
+
+func TestFooterKeepsAnUnstampedVersionAsIs(t *testing.T) {
+	setBuildInfo(t, "dev", "unknown")
+
+	rec := httptest.NewRecorder()
+	newTestApp(t).newMux().ServeHTTP(rec, httptest.NewRequest("GET", "/alice/", nil))
+
+	if body := rec.Body.String(); !strings.Contains(body, "dev (unknown)") {
+		t.Errorf("the footer does not show the unstamped build info, body: %s", body)
+	}
+}
+
+func TestFooterLinksTheAppNameToTheRepository(t *testing.T) {
+	rec := httptest.NewRecorder()
+	newTestApp(t).newMux().ServeHTTP(rec, httptest.NewRequest("GET", "/alice/", nil))
+
+	if body := rec.Body.String(); !strings.Contains(body, `href="https://github.com/choffmann/simple-fileupload"`) {
+		t.Errorf("the footer does not link the app name to the repository, body: %s", body)
+	}
+}
