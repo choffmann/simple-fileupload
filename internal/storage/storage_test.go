@@ -64,3 +64,19 @@ func TestResolvePathStaysInsideUserDir(t *testing.T) {
 		}
 	}
 }
+
+func TestUsernameCannotEscapeBaseDir(t *testing.T) {
+	s := New(t.TempDir())
+
+	for _, username := range []string{"../../etc", "..", ".", "", "a/b", `a\b`, "/etc", "alice/../bob"} {
+		if got, err := s.ResolvePath(username, ""); err == nil {
+			t.Errorf("ResolvePath(%q, \"\") returned %q, want an error", username, got)
+		}
+		if s.UserExists(username) {
+			t.Errorf("UserExists(%q) is true, want false", username)
+		}
+		if err := s.EnsureUserDir(username); err == nil {
+			t.Errorf("EnsureUserDir(%q) succeeded, want an error", username)
+		}
+	}
+}

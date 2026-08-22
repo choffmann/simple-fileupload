@@ -24,11 +24,26 @@ func New(baseDir string) *Storage {
 	return &Storage{BaseDir: baseDir}
 }
 
+// A username is always a single path segment. It is the one input that can escape
+// BaseDir, because filepath.Clean keeps a leading "..", and the prefix check in
+// ResolvePath cannot catch that: userDir is built from the same value.
+func (s *Storage) userDir(username string) (string, error) {
+	if username == "" || username == "." || username == ".." ||
+		strings.ContainsAny(username, `/\`) || strings.ContainsRune(username, 0) {
+		return "", fmt.Errorf("invalid username %q", username)
+	}
+	return filepath.Join(s.BaseDir, username), nil
+}
+
 func (s *Storage) ResolvePath(username, subpath string) (string, error) {
-	userDir := filepath.Join(s.BaseDir, filepath.Clean(username))
+	userDir, err := s.userDir(username)
+	if err != nil {
+		return "", err
+	}
+
 	full := filepath.Join(userDir, filepath.Clean("/"+subpath))
 
-	if !strings.HasPrefix(full, userDir) {
+	if full != userDir && !strings.HasPrefix(full, userDir+string(filepath.Separator)) {
 		return "", fmt.Errorf("invalid path")
 	}
 
@@ -36,7 +51,10 @@ func (s *Storage) ResolvePath(username, subpath string) (string, error) {
 }
 
 func (s *Storage) EnsureUserDir(username string) error {
-	dir := filepath.Join(s.BaseDir, filepath.Clean(username))
+	dir, err := s.userDir(username)
+	if err != nil {
+		return err
+	}
 	return os.MkdirAll(dir, 0o755)
 }
 
@@ -53,9 +71,11 @@ func (s *Storage) SaveFile(username, subpath string, file io.Reader, filename st
 	cleanName := sanitizeFilename(filename)
 	dst := filepath.Join(dir, cleanName)
 
-	// Verify the final path is still within user directory
-	userDir := filepath.Join(s.BaseDir, filepath.Clean(username))
-	if !strings.HasPrefix(dst, userDir) {
+	userDir, err := s.userDir(username)
+	if err != nil {
+		return "", err
+	}
+	if !strings.HasPrefix(dst, userDir+string(filepath.Separator)) {
 		return "", fmt.Errorf("invalid filename")
 	}
 
@@ -114,7 +134,11 @@ func (s *Storage) ListUsers() ([]string, error) {
 }
 
 func (s *Storage) UserExists(username string) bool {
-	dir := filepath.Join(s.BaseDir, filepath.Clean(username))
+	dir, err := s.userDir(username)
+	if err != nil {
+		return false
+	}
+
 	info, err := os.Stat(dir)
 	return err == nil && info.IsDir()
 }
